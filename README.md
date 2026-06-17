@@ -1,207 +1,228 @@
-# Thought Bank
+# Thought Bank 🧠
 
-A frictionless capture layer for global human ideation. Dump a raw thought, and the system maps it into a shared vector space, scores its originality, and — if many people think the same thing — synthesizes the collective insight.
+> Drop a raw thought. The system maps it into a shared vector space, scores its originality, and — when enough people share it — synthesises the collective insight.
 
-This is a **third project** that draws from two existing codebases:
+![Python](https://img.shields.io/badge/Python-3.10+-7F77DD?style=flat-square&labelColor=1a1a2e)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-7F77DD?style=flat-square&labelColor=1a1a2e)
+![pgvector](https://img.shields.io/badge/pgvector-HNSW-1D9E75?style=flat-square&labelColor=1a1a2e)
+![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-1D9E75?style=flat-square&labelColor=1a1a2e)
+![React](https://img.shields.io/badge/React-18-6366f1?style=flat-square&labelColor=1a1a2e)
+![License](https://img.shields.io/badge/license-MIT-888?style=flat-square&labelColor=1a1a2e)
 
-- **[originality_radar](https://github.com/giljorge0/originality_radar)** — multi-user pgvector infrastructure, k-NN scoring, cosine similarity math, live WebSocket map
-- **[Digital-Brain-Project](https://github.com/giljorge0/Digital-Brain-Project)** — auto-wiki synthesis, relation extraction, LangGraph query agents, claim extraction
+---
 
-## The Three Features
+## What it does
 
-### 1. "You Are Not Alone" Engine
-Submit a thought. If it lands in a dense vector neighborhood (cosine similarity ≥ 0.75 with 3+ existing thoughts), the system synthesizes the cluster: how many people share this thought, what they collectively concluded, and the core insight distilled from dozens of independent minds.
+Submit any thought — no title, no tags, no friction. The backend embeds it into a 768-dimensional vector space, runs a k-NN query against every previous submission, and returns:
+
+- An **originality score** (0–100) based on cosine similarity
+- A **density label** (SATURATED → VOID) showing how crowded that region of thought-space is
+- The **nearest existing thoughts** and their similarity percentages
+- A **"You Are Not Alone"** synthesis card if 3+ people have thought something similar — showing the count, the collective core insight, and key recurring themes
+- A **drift suggestion** for how to push the idea further into unexplored territory
+
+Everything feeds into a **live WebSocket map** where dots appear in real-time as thoughts come in from anyone connected.
+
+---
+
+## The three features
+
+### 1. You Are Not Alone
+Write down a highly specific anxiety or a niche idea. If the vector neighborhood is dense enough (cosine similarity ≥ 0.75 across 3+ existing thoughts), the system synthesises them into a validating response:
+
+```
+5 other people have submitted a very similar thought.
+
+Core insight: Fear of existential risk drives independent convergence on space colonisation.
+
+Themes: multi-planetary · extinction risk · space colonisation
+```
 
 ### 2. Predictive Solution Market
-Background DBSCAN clustering detects dense thought regions. Temporal velocity tracking (7-day vs 30-day growth rates) identifies clusters expanding exponentially — a real-time heatmap of emerging problems and opportunities.
+Background DBSCAN clustering detects dense thought regions. 7-day vs 30-day velocity tracking flags clusters with accelerating growth — a real-time signal for which problems are becoming urgent before they're obvious.
+
+```
+GET /api/trends/predictive
+→ clusters sorted by velocity_7d / velocity_30d ratio
+```
 
 ### 3. Asynchronous Global Brainstorming
-For mature clusters (10+ thoughts), an auto-wiki generator produces a living synthesis page. Atomic claims are extracted from individual thoughts (adapted from `relations.py`), contradictions flagged, and the best framings surfaced.
+For mature clusters (10+ thoughts), an auto-wiki generator synthesises the best framings into a living page. Atomic claims are extracted and contradictions flagged. Pages update incrementally as new thoughts arrive.
 
-## Architecture
+---
+
+## How a thought is processed
 
 ```
-User Input ──▶ Ollama Embedding (nomic-embed-text, 768-dim)
-                    │
-                    ▼
-              pgvector k-NN Query
-                    │
-         ┌──────────┴──────────┐
-         ▼                     ▼
-   High Similarity        Low Similarity
-   (≥ 0.75 avg)          (< 0.75 avg)
-         │                     │
-         ▼                     ▼
-   "You Are Not Alone"    Originality Score
-   LLM Synthesis          + Drift Suggestions
-         │                     │
-         └──────────┬──────────┘
-                    ▼
-           Store + Broadcast (WebSocket)
-                    │
-              ┌─────┴─────┐
-              ▼           ▼
-        React UI      Background Jobs
-        (Canvas Map)  (DBSCAN clustering,
-                       velocity tracking,
-                       wiki generation)
+User input
+    ↓
+nomic-embed-text via Ollama → 768-dim vector
+    ↓
+pgvector HNSW k-NN → 10 nearest neighbors (<100ms)
+    ↓
+score = (1 − avgSim) × 100
+    ↓
+if neighbors with sim ≥ 0.75 ≥ 3:
+    → fetch full neighborhood (up to 50)
+    → mistral synthesises "You Are Not Alone" response
+else:
+    → mistral generates drift suggestion
+    ↓
+2D PCA projection → map coordinates
+    ↓
+store in PostgreSQL + broadcast via WebSocket
 ```
 
-### From originality_radar
-- `services/vector.py` — cosine similarity, scoring formula, PCA projection (ported from `vector.js`)
-- `services/embeddings.py` — Ollama integration for embeddings + drift analysis (ported from `anthropic.js`)
-- `db/client.py` — pgvector queries, k-NN, HNSW indexes (ported from `client.js` + migrations)
-- WebSocket broadcast for live map updates
+---
 
-### From Digital-Brain-Project
-- `agents/synthesis.py` — "You Are Not Alone" cluster synthesis (adapted from `auto_wiki.py` generation pattern)
-- `analytics/clustering.py` — DBSCAN clustering + wiki generation (adapted from `auto_wiki.py` scheduled refresh)
-- Claim extraction and contradiction detection (adapted from `relations.py`)
-
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |-------|-----------|
-| **Frontend** | React 18 + Vite, D3-style canvas map |
-| **Backend** | Python 3.10+ / FastAPI |
-| **Vector DB** | PostgreSQL + pgvector (Supabase compatible) |
-| **Embeddings** | Ollama (`nomic-embed-text`, 768-dim) |
-| **Analysis LLM** | Ollama (`mistral`) — no API keys needed |
-| **Background** | APScheduler (clustering every 6h, velocity every 1h) |
+| Backend | Python 3.10+ / FastAPI / asyncpg |
+| Frontend | React 18 / Vite |
+| Vector DB | PostgreSQL 14+ / pgvector (HNSW index) |
+| Embeddings | Ollama — `nomic-embed-text` (768-dim) |
+| Analysis LLM | Ollama — `mistral` |
+| Clustering | scikit-learn DBSCAN |
+| Background jobs | APScheduler (clustering 6h, velocity 1h) |
+| Realtime | WebSocket broadcast |
 
-## Quick Start
+No API keys. Runs entirely locally via Ollama.
 
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
-- PostgreSQL 14+ with pgvector
-- [Ollama](https://ollama.com) running locally:
-  ```bash
-  ollama pull nomic-embed-text
-  ollama pull mistral
-  ```
+---
 
-### 1. Clone & Install
-
-```bash
-git clone https://github.com/giljorge0/thought-bank.git
-cd thought-bank
-
-# Backend
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Frontend
-cd ../frontend
-npm install
-```
-
-### 2. Database
-
-Create a PostgreSQL database and enable pgvector:
-```sql
-CREATE DATABASE thought_bank;
-\c thought_bank
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-The FastAPI backend runs migrations automatically on startup.
-
-### 3. Environment
-
-```bash
-cp backend/.env.example backend/.env
-# Edit DATABASE_URL in backend/.env
-```
-
-### 4. Run
-
-```bash
-# Terminal 1 — Backend
-cd backend
-source venv/bin/activate
-python main.py
-# → Thought Bank on http://localhost:8000
-
-# Terminal 2 — Frontend
-cd frontend
-npm run dev
-# → http://localhost:5173
-```
-
-## Project Structure
+## Project structure
 
 ```
 thought-bank/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── ThoughtInput.jsx      # Frictionless capture
-│   │   │   ├── ResultCard.jsx        # Score + YANA synthesis + drift
-│   │   │   └── ThoughtMap.jsx        # Canvas vector space visualization
-│   │   ├── hooks/
-│   │   │   └── useWebSocket.js       # Live multiplayer (from originality_radar)
-│   │   ├── api/
-│   │   │   └── client.js             # API hooks
-│   │   ├── App.jsx
-│   │   └── app.css
-│   ├── index.html
-│   ├── vite.config.js
-│   └── package.json
-│
 ├── backend/
-│   ├── main.py                       # FastAPI app + WebSocket + scheduler
-│   ├── db/
-│   │   ├── client.py                 # Async pgvector client
-│   │   └── migrations/
-│   │       └── 001_create_thoughts.sql
+│   ├── main.py                     # FastAPI routes + WebSocket
+│   ├── agents/synthesis.py         # "You Are Not Alone" pipeline
+│   ├── analytics/clustering.py     # DBSCAN + auto-wiki + velocity
 │   ├── services/
-│   │   ├── embeddings.py             # Ollama embedding + synthesis + wiki
-│   │   └── vector.py                 # Cosine math, scoring, PCA projection
-│   ├── agents/
-│   │   └── synthesis.py              # "You Are Not Alone" pipeline
-│   ├── analytics/
-│   │   └── clustering.py             # DBSCAN + velocity + wiki generation
-│   ├── requirements.txt
-│   └── .env.example
+│   │   ├── embeddings.py           # Ollama integration
+│   │   └── vector.py               # Cosine math + PCA projection
+│   ├── db/
+│   │   ├── client.py               # Async pgvector client
+│   │   └── migrations/001_...sql   # Schema
+│   └── requirements.txt
 │
-└── docs/
+└── frontend/
+    ├── src/
+    │   ├── App.jsx
+    │   ├── components/
+    │   │   ├── ThoughtInput.jsx     # Frictionless capture
+    │   │   ├── ResultCard.jsx       # Score + YANA + drift
+    │   │   └── ThoughtMap.jsx       # Canvas vector space
+    │   └── hooks/useWebSocket.js    # Live updates
+    └── package.json
 ```
 
-## API Reference
+---
 
-### `POST /api/thoughts/submit`
-Submit a thought. Returns originality score, drift analysis, and (if dense neighborhood) "You Are Not Alone" synthesis.
+## Quick start
 
-### `GET /api/thoughts/map?domain=Tech`
-All thoughts with 2D coordinates for visualization.
+### Prerequisites
 
-### `GET /api/thoughts/stats`
-Aggregate statistics.
+```bash
+# Ollama running locally with models pulled
+ollama pull nomic-embed-text
+ollama pull mistral
 
-### `GET /api/clusters`
-All detected clusters with wiki content.
+# PostgreSQL with pgvector
+createdb thought_bank
+psql thought_bank -c "CREATE EXTENSION vector;"
+```
 
-### `GET /api/trends/predictive`
-Trending clusters (accelerating growth velocity).
+### Docker (one command)
 
-### `WS /ws`
-Live thought broadcast. Receives `NEW_THOUGHT` events.
+```bash
+git clone https://github.com/giljorge0/thought-bank
+cd thought-bank
+docker-compose up
+# Then in another terminal:
+docker exec thought-bank-ollama-1 ollama pull nomic-embed-text mistral
+```
+
+Open http://localhost:5173
+
+### Manual
+
+```bash
+# Backend
+cd backend
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # set DATABASE_URL
+python3 main.py
+
+# Frontend (new terminal)
+cd frontend
+npm install && npm run dev
+```
+
+---
+
+## API
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/thoughts/submit` | Submit a thought → score + synthesis |
+| `GET /api/thoughts/map?domain=Tech` | All thoughts with 2D coordinates |
+| `GET /api/thoughts/stats` | Aggregate statistics |
+| `GET /api/clusters` | All clusters with wiki content |
+| `GET /api/trends/predictive` | Trending clusters (Phase 3) |
+| `WS /ws` | Live thought broadcast |
+| `POST /api/admin/cluster-now` | Trigger DBSCAN clustering |
+
+---
+
+## Scoring
+
+```python
+# k-NN query: 10 nearest neighbors by cosine distance
+similarities = [sim(new_vec, neighbor) for neighbor in top_10]
+avg_sim = mean(similarities)
+score = round((1 - avg_sim) * 100)
+
+# Density labels
+0–15   → SATURATED   # heavily explored territory
+16–35  → DENSE
+36–55  → POPULATED
+56–75  → SPARSE
+76–90  → FRONTIER
+91–100 → VOID        # unexplored
+```
+
+---
+
+## Related projects
+
+This project draws from two existing codebases:
+
+- **[originality_radar](https://github.com/giljorge0/originality_radar)** — multi-user pgvector infrastructure, k-NN scoring, cosine similarity math, live WebSocket map. The vector math (`vector.py`), Ollama integration (`embeddings.py`), and database schema are ported from there.
+
+- **[Digital-Brain-Project](https://github.com/giljorge0/Digital-Brain-Project)** — auto-wiki synthesis, relation extraction, claim extraction, LangGraph query agents. The synthesis pipeline (`agents/synthesis.py`) and clustering wiki generation (`analytics/clustering.py`) adapt patterns from `auto_wiki.py` and `relations.py`.
+
+Thought Bank is the third project: a new repo that extracts the multi-user vector layer from originality_radar and powers it with the neuro-symbolic synthesis agents from Digital-Brain-Project.
+
+---
 
 ## Roadmap
 
-- [x] "You Are Not Alone" engine (Phase 1)
-- [x] pgvector schema with cluster support
-- [x] Originality scoring + drift analysis
-- [x] Live WebSocket map
-- [x] DBSCAN clustering + wiki generation (Phase 2)
-- [x] Velocity tracking + trend detection (Phase 3)
-- [ ] User accounts
-- [ ] D3.js force-directed cluster visualization
+- [x] "You Are Not Alone" engine
+- [x] Originality scoring + density labels
+- [x] Drift suggestions
+- [x] 2D canvas map + WebSocket live updates
+- [x] DBSCAN clustering + auto-wiki generation
+- [x] Temporal velocity tracking + trend detection
+- [ ] Force-directed cluster visualization (D3.js)
+- [ ] User accounts (personal thought journey)
+- [ ] `query_agent.py` endpoint — "ask the cluster a question"
 - [ ] Mobile app
-- [ ] Multi-language support
+
+---
 
 ## License
 
